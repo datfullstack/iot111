@@ -1,0 +1,474 @@
+#include <Adafruit_NeoPixel.h>
+    #include <SoftwareSerial.h>
+    
+    // Configurations
+    #define LED_PIN 6
+    #define NUM_LEDS_PER_STRIP 50
+    #define NUM_STRIPS 5
+    #define SOUND_SENSOR_PIN A0
+    #define LIGHT_SENSOR_PIN A1
+    #define BLUETOOTH_RX_PIN 10
+    #define BLUETOOTH_TX_PIN 11
+    
+    // Bluetooth module
+    SoftwareSerial bluetooth(BLUETOOTH_RX_PIN, BLUETOOTH_TX_PIN);
+    
+    // Define effects
+    enum Effects { 
+      STATIC, 
+      FADE, 
+      RAINBOW, 
+      THEATER_CHASE, 
+      BLINK, 
+      CHASING, 
+      MUSIC, 
+      DRAW, 
+      WAVE, 
+      CHASEMUSIC  // New Effect
+    };
+    Effects currentEffect = STATIC;
+    
+    // Create LED strip objects
+    Adafruit_NeoPixel strips[NUM_STRIPS] = {
+      Adafruit_NeoPixel(NUM_LEDS_PER_STRIP, LED_PIN, NEO_GRB + NEO_KHZ800),
+      Adafruit_NeoPixel(NUM_LEDS_PER_STRIP, LED_PIN, NEO_GRB + NEO_KHZ800),
+      Adafruit_NeoPixel(NUM_LEDS_PER_STRIP, LED_PIN, NEO_GRB + NEO_KHZ800),
+      Adafruit_NeoPixel(NUM_LEDS_PER_STRIP, LED_PIN, NEO_GRB + NEO_KHZ800),
+      Adafruit_NeoPixel(NUM_LEDS_PER_STRIP, LED_PIN, NEO_GRB + NEO_KHZ800)
+    };
+    
+    // Variables
+    int effectSpeed = 100;    // Default effect speed
+    int brightness = 128;     // Default brightness
+    char receivedCommand;     // Bluetooth received data
+    int redValue = 255;       // Default Red value
+    int greenValue = 0;       // Default Green value
+    int blueValue = 0;        // Default Blue value
+    bool ledOn = true;        // LED on/off state
+    int previousMicValue = 0; // For smoothing microphone input
+    
+    // Constants for Chasing Music Effect
+    #define MAX_CHASING_DOTS 20
+    #define BEAT_THRESHOLD 600  // Adjust based on your sound sensor sensitivity
+    
+    struct ChasingDot {
+      int pos;       // Current position
+      bool active;   // Is the dot active
+    };
+    
+    ChasingDot chasingDots[MAX_CHASING_DOTS];
+    
+    // Initialize chasing dots
+    void initializeChasingDots() {
+      for(int i = 0; i < MAX_CHASING_DOTS; i++) {
+        chasingDots[i].active = false;
+        chasingDots[i].pos = 0;
+      }
+    }
+    
+    void setup() {
+      Serial.begin(9600);
+      bluetooth.begin(9600);
+      
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        strips[i].begin();
+        strips[i].show();  // Initialize all LEDs to off
+      }
+      
+      pinMode(SOUND_SENSOR_PIN, INPUT);
+      pinMode(LIGHT_SENSOR_PIN, INPUT);
+      
+      initializeChasingDots(); // Initialize chasing dots
+    }
+    
+    void loop() {
+      // Read sensors
+      int soundLevel = analogRead(SOUND_SENSOR_PIN);
+      int lightLevel = analogRead(LIGHT_SENSOR_PIN);
+    
+      // Adjust speed and brightness based on sensors
+      effectSpeed = map(soundLevel, 0, 1023, 10, 200);
+      brightness = map(lightLevel, 0, 1023, 255, 0);
+      
+      // Send brightness level over Bluetooth
+      bluetooth.println("Brightness: " + String(brightness));
+      
+      // Bluetooth command handling
+      if (bluetooth.available()) {
+        receivedCommand = bluetooth.read();
+        handleBluetoothCommand(receivedCommand);
+      }
+    
+      // Apply current effect if LEDs are on
+      if (ledOn) {
+        applyEffect(currentEffect, soundLevel);
+      } else {
+        turnOffLEDs();
+      }
+    
+      delay(effectSpeed);
+    }
+    
+    void handleBluetoothCommand(char command) {
+      // Command format to change LED state or effect
+      switch (command) {
+        case '0': // Turn LEDs OFF
+          ledOn = false;
+          Serial.println("LEDs turned OFF");
+          break;
+        case '1': // Turn LEDs ON
+          ledOn = true;
+          Serial.println("LEDs turned ON");
+          break;
+        case '2': // STATIC Effect
+          currentEffect = STATIC;
+          Serial.println("Effect: STATIC");
+          break;
+        case '3': // FADE Effect
+          currentEffect = FADE;
+          Serial.println("Effect: FADE");
+          break;
+        case '4': // RAINBOW Effect
+          currentEffect = RAINBOW;
+          Serial.println("Effect: RAINBOW");
+          break;
+        case '5': // THEATER CHASE Effect
+          currentEffect = THEATER_CHASE;
+          Serial.println("Effect: THEATER_CHASE");
+          break;
+        case '6': // BLINK Effect
+          currentEffect = BLINK;
+          Serial.println("Effect: BLINK");
+          break;
+        case '7': // MUSIC Effect
+          currentEffect = MUSIC;
+          Serial.println("Effect: MUSIC");
+          break;
+        case '8': // CHASING Effect
+          currentEffect = CHASING;
+          Serial.println("Effect: CHASING");
+          break;
+        case '9': // WAVE Effect
+          currentEffect = WAVE;
+          Serial.println("Effect: WAVE");
+          break;
+        case 'A': // DRAW Effect (using 'A' instead of '11' since commands are single characters)
+          currentEffect = DRAW;
+          Serial.println("Effect: DRAW");
+          break;
+        case 'C': // CHASEMUSIC Effect (using 'C' as a new command)
+          currentEffect = CHASEMUSIC;
+          Serial.println("Effect: CHASEMUSIC");
+          break;
+        case 'R': // Receive Red color value
+          redValue = bluetooth.parseInt();
+          Serial.println("Red Value: " + String(redValue));
+          break;
+        case 'G': // Receive Green color value
+          greenValue = bluetooth.parseInt();
+          Serial.println("Green Value: " + String(greenValue));
+          break;
+        case 'B': // Receive Blue color value
+          blueValue = bluetooth.parseInt();
+          Serial.println("Blue Value: " + String(blueValue));
+          break;
+        default:
+          Serial.println("Unknown Command");
+          break;
+      }
+    }
+    
+    void applyEffect(Effects effect, int soundLevel) {
+      switch (effect) {
+        case STATIC:
+          setAllLEDs(redValue, greenValue, blueValue);  // Apply user-selected color
+          break;
+        case FADE:
+          fadeEffect();
+          break;
+        case RAINBOW:
+          rainbowEffect();
+          break;
+        case THEATER_CHASE:
+          theaterChaseEffect();
+          break;
+        case BLINK:
+          blinkEffect();
+          break;
+        case CHASING:
+          chasingEffect();
+          break;
+        case MUSIC:
+          musicBarEffect();
+          break;
+        case DRAW:
+          musicShapeEffect();
+          break;
+        case WAVE:
+          waveEffect(soundLevel);
+          break;
+        case CHASEMUSIC:
+          chasingMusicEffect(); // Apply the updated Chasing Music Effect
+          break;
+      }
+    }
+    
+    // Turn off all LEDs
+    void turnOffLEDs() {
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          strips[i].setPixelColor(j, 0, 0, 0);
+        }
+        strips[i].show();
+      }
+    }
+    
+    // LED Effects
+    void setAllLEDs(uint8_t r, uint8_t g, uint8_t b) {
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          strips[i].setPixelColor(j, r, g, b);
+        }
+        strips[i].show();
+      }
+    }
+    
+    void fadeEffect() {
+      static uint8_t brightnessLevel = 0;
+      static int fadeDirection = 1;
+      brightnessLevel += fadeDirection * 5;
+      if (brightnessLevel == 0 || brightnessLevel == 255) fadeDirection = -fadeDirection;
+    
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          uint8_t r = map(redValue, 0, 255, 0, brightnessLevel);
+          uint8_t g = map(greenValue, 0, 255, 0, brightnessLevel);
+          uint8_t b = map(blueValue, 0, 255, 0, brightnessLevel);
+          strips[i].setPixelColor(j, r, g, b);
+        }
+        strips[i].show();
+      }
+    }
+    
+    void rainbowEffect() {
+      static uint16_t hue = 0;  // Hue value for color
+      hue += 256 / NUM_LEDS_PER_STRIP;  // Increment hue to create rainbow effect
+    
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          uint32_t color = strips[i].gamma32(stripColorHSV(hue + j * (65536 / NUM_LEDS_PER_STRIP)));
+          strips[i].setPixelColor(j, color);
+        }
+        strips[i].show();
+      }
+    }
+    
+    uint32_t stripColorHSV(uint16_t hue) {
+      // Convert HSV to RGB using Adafruit's built-in function
+      return strips[0].gamma32(strips[0].ColorHSV(hue));
+    }
+    
+    void theaterChaseEffect() {
+      static int position = 0;
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          if ((j + position) % 3 == 0) {
+            strips[i].setPixelColor(j, redValue, greenValue, blueValue);
+          } else {
+            strips[i].setPixelColor(j, 0, 0, 0);
+          }
+        }
+        strips[i].show();
+      }
+      position = (position + 1) % 3;
+    }
+    
+    void blinkEffect() {
+      static bool state = false;
+      state = !state;
+      uint32_t color = state ? strips[0].Color(redValue, greenValue, blueValue) : strips[0].Color(0, 0, 0);
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          strips[i].setPixelColor(j, color);
+        }
+        strips[i].show();
+      }
+    }
+    
+    void chasingEffect() {
+      static int head = 0;
+      static int tail = -10;
+      head = (head + 1) % NUM_LEDS_PER_STRIP;
+      tail = (tail + 1) % NUM_LEDS_PER_STRIP;
+    
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          if (j == head) {
+            strips[i].setPixelColor(j, redValue, greenValue, blueValue);  // Head
+          } else if (j == tail) {
+            strips[i].setPixelColor(j, 0, 0, 0);  // Tail off
+          } else {
+            strips[i].setPixelColor(j, 0, 0, 0);  // Others off
+          }
+        }
+        strips[i].show();
+      }
+    }
+    
+    void musicBarEffect() {
+      int smoothMicValue = analogRead(SOUND_SENSOR_PIN);  // Read microphone input
+      smoothMicValue = (smoothMicValue + previousMicValue) / 2;  // Smooth the value
+    
+      int numActiveLeds = map(smoothMicValue, 0, 1023, 1, NUM_LEDS_PER_STRIP);
+      uint8_t r = map(redValue, 0, 255, 0, brightness);
+      uint8_t g = map(greenValue, 0, 255, 0, brightness);
+      uint8_t b = map(blueValue, 0, 255, 0, brightness);
+    
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          if (j < numActiveLeds) {
+            strips[i].setPixelColor(j, r, g, b);
+          } else {
+            strips[i].setPixelColor(j, 0, 0, 0);
+          }
+        }
+        strips[i].show();
+      }
+    
+      previousMicValue = smoothMicValue;  // Update previous value for smoothing
+    }
+    
+    void musicShapeEffect() {
+      int soundLevel = analogRead(SOUND_SENSOR_PIN);  // Read sound signal
+      int smoothMicValue = (soundLevel + previousMicValue) / 2;  // Smooth signal
+      previousMicValue = smoothMicValue;  // Update for next iteration
+    
+      // Calculate the size of the square based on sound level
+      if (smoothMicValue > 60) {  // If sound intensity exceeds threshold
+        // Draw a square on the LED strip
+        for (int i = 0; i < NUM_LEDS_PER_STRIP; i++) {
+          int color = (i % 2 == 0) ? strips[0].Color(255, 0, 0) : strips[0].Color(0, 255, 0);  // Red and Green
+          strips[0].setPixelColor(i, color);
+        }
+        strips[0].show();  // Update LED strip
+        delay(100);  // Time to display the shape
+        for (int i = 0; i < NUM_LEDS_PER_STRIP; i++) {
+          strips[0].setPixelColor(i, 0, 0, 0);  // Turn off LEDs
+        }
+        strips[0].show();
+      }
+    }
+    
+    void waveEffect(int soundLevel) {
+      // Map sound level to wave amplitude
+      int amplitude = map(soundLevel, 0, 1023, 1, NUM_LEDS_PER_STRIP / 2);
+      
+      // Static variable to keep track of wave position
+      static float wavePhase = 0;
+      
+      // Wave parameters
+      float frequency = 0.2;  // Controls the number of waves
+      float speed = 0.1;       // Controls the speed of wave movement
+      
+      // Update wave phase based on speed
+      wavePhase += speed;
+      if (wavePhase > TWO_PI) wavePhase -= TWO_PI;
+      
+      for (int i = 0; i < NUM_STRIPS; i++) {
+        for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          // Calculate sine wave value
+          float sineValue = sin(frequency * j + wavePhase);
+          
+          // Normalize sine value to 0-255
+          uint8_t brightnessValue = map((sineValue + 1) * 127.5, 0, 255, 0, 255);
+          
+          // Adjust brightness based on sound amplitude
+          brightnessValue = brightnessValue * amplitude / (NUM_LEDS_PER_STRIP / 2);
+          
+          // Set LED color with adjusted brightness
+          strips[i].setPixelColor(j, 
+            (redValue * brightnessValue) / 255,
+            (greenValue * brightnessValue) / 255,
+            (blueValue * brightnessValue) / 255
+          );
+        }
+        strips[i].show();
+      }
+    }
+    
+    // ------------------- Chasing Music Effect -------------------
+    void chasingMusicEffect() {
+      int soundLevel = analogRead(SOUND_SENSOR_PIN);  // Read sound level
+      int smoothMicValue = (soundLevel + previousMicValue) / 2;  // Smooth the value
+      previousMicValue = smoothMicValue;
+    
+      // Detect beat: rising edge crossing the threshold
+      static bool wasAbove = false;
+      if (smoothMicValue > BEAT_THRESHOLD) {
+        if (!wasAbove) {
+          // New beat detected, add two chasing dots
+          addChasingDots();
+          wasAbove = true;
+        }
+      } else {
+        wasAbove = false;
+      }
+    
+      // Update all active chasing dots
+      updateChasingDots();
+    }
+    
+    void addChasingDots() {
+      // Add two new chasing dots
+      for(int i = 0; i < 2; i++) {
+        bool added = false;
+        for(int j = 0; j < MAX_CHASING_DOTS; j++) {
+          if(!chasingDots[j].active) {
+            chasingDots[j].active = true;
+            chasingDots[j].pos = 0;
+            added = true;
+            break;
+          }
+        }
+        if(!added) {
+          Serial.println("Max chasing dots reached!");
+        }
+      }
+    }
+    
+    void updateChasingDots() {
+      // Create a 2D array to mark active LEDs
+      bool ledActive[NUM_STRIPS][NUM_LEDS_PER_STRIP] = {false};
+    
+      // Update positions of all active chasing dots
+      for(int i = 0; i < MAX_CHASING_DOTS; i++) {
+        if(chasingDots[i].active) {
+          // Mark the current position as active
+          if(chasingDots[i].pos < NUM_LEDS_PER_STRIP) {
+            for(int strip = 0; strip < NUM_STRIPS; strip++) {
+              ledActive[strip][chasingDots[i].pos] = true;
+            }
+            // Move the dot forward
+            chasingDots[i].pos += 1;
+          } else {
+            // Dot has reached the end, deactivate it
+            chasingDots[i].active = false;
+          }
+        }
+      }
+    
+      // Update LEDs based on ledActive
+      for(int strip = 0; strip < NUM_STRIPS; strip++) {
+        for(int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+          if(ledActive[strip][j]) {
+            strips[strip].setPixelColor(j, redValue, greenValue, blueValue);
+          } else {
+            strips[strip].setPixelColor(j, 0, 0, 0);
+          }
+        }
+        strips[strip].show();
+      }
+    }
+    // ------------------- End of Chasing Music Effect -------------------
+    
+    
