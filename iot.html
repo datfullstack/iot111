@@ -24,7 +24,8 @@
       MUSIC, 
       DRAW, 
       WAVE, 
-      CHASEMUSIC  // New Effect
+      CHASEMUSIC,
+      SPARKLE  // New Effect
     };
     Effects currentEffect = STATIC;
     
@@ -160,6 +161,10 @@
           currentEffect = CHASEMUSIC;
           Serial.println("Effect: CHASEMUSIC");
           break;
+        case 'D': // SPARKLE Effect (New Command)
+          currentEffect = SPARKLE;
+          Serial.println("Effect: SPARKLE");
+          break;
         case 'R': // Receive Red color value
           redValue = bluetooth.parseInt();
           Serial.println("Red Value: " + String(redValue));
@@ -209,6 +214,9 @@
           break;
         case CHASEMUSIC:
           chasingMusicEffect(); // Apply the updated Chasing Music Effect
+          break;
+        case SPARKLE:
+          sparkleEffect(); // Apply the new Sparkle Effect
           break;
       }
     }
@@ -427,7 +435,7 @@
             chasingDots[j].active = true;
             chasingDots[j].pos = 0;
             added = true;
-            break;
+            break; // Add only one dot per iteration
           }
         }
         if(!added) {
@@ -471,4 +479,53 @@
     }
     // ------------------- End of Chasing Music Effect -------------------
     
+    // ------------------- Sparkle Effect -------------------
+    void sparkleEffect() {
+      // Number of sparkles per cycle
+      const int numSparkles = 5; // Adjust for desired density
+    
+      // Randomly select LEDs to sparkle
+      for(int i = 0; i < numSparkles; i++) {
+        int stripIndex = random(0, NUM_STRIPS);
+        int ledIndex = random(0, NUM_LEDS_PER_STRIP);
+        
+        // Set a random color with random brightness
+        uint8_t r = random(0, redValue + 1);
+        uint8_t g = random(0, greenValue + 1);
+        uint8_t b = random(0, blueValue + 1);
+        strips[stripIndex].setPixelColor(ledIndex, strips[stripIndex].Color(r, g, b));
+      }
+      
+      // Update the LED strips to show the sparkles
+      for(int i = 0; i < NUM_STRIPS; i++) {
+        strips[i].show();
+      }
+      
+      // Brief delay to allow sparkles to appear
+      delay(50);
+      
+      // Fade out the sparkles smoothly
+      for(int brightnessLevel = 255; brightnessLevel >= 0; brightnessLevel -= 25) { // Adjust fade steps
+        for(int i = 0; i < NUM_STRips; i++) {
+          for(int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
+            // Get current color
+            uint32_t color = strips[i].getPixelColor(j);
+            uint8_t r = (color >> 16) & 0xFF;
+            uint8_t g = (color >> 8) & 0xFF;
+            uint8_t b = color & 0xFF;
+            
+            // Apply fading
+            r = map(r, 0, 255, 0, brightnessLevel);
+            g = map(g, 0, 255, 0, brightnessLevel);
+            b = map(b, 0, 255, 0, brightnessLevel);
+            
+            // Set faded color
+            strips[i].setPixelColor(j, r, g, b);
+          }
+          strips[i].show();
+        }
+        delay(30); // Adjust fade speed
+      }
+    }
+    // ------------------- End of Sparkle Effect -------------------
     
